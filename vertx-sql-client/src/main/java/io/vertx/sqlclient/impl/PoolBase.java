@@ -60,6 +60,10 @@ public abstract class PoolBase<P extends Pool> extends SqlClientBase<P> implemen
     return vertx.promise();
   }
 
+  protected ContextInternal context() {
+    return vertx.getOrCreateContext();
+  }
+
   @Override
   protected <T> PromiseInternal<T> promise(Handler<AsyncResult<T>> handler) {
     return vertx.promise(handler);
@@ -97,7 +101,8 @@ public abstract class PoolBase<P extends Pool> extends SqlClientBase<P> implemen
   }
 
   @Override
-  public <R> void schedule(CommandBase<R> cmd, Promise<R> promise) {
+  public <R> Future<R> schedule(ContextInternal context, CommandBase<R> cmd) {
+    Promise<R> promise = context.promise();
     Object metric;
     if (metrics != null) {
       metric = metrics.enqueueRequest();
@@ -110,8 +115,9 @@ public abstract class PoolBase<P extends Pool> extends SqlClientBase<P> implemen
         if (metrics != null) {
           metrics.dequeueRequest(metric);
         }
-        conn.schedule(cmd, promise);
-        promise.future().onComplete(ar -> {
+        conn.schedule(context, cmd)
+          .onComplete(promise)
+          .onComplete(v -> {
           // Use null promise instead
           conn.close(this, Promise.promise());
         });
@@ -124,6 +130,7 @@ public abstract class PoolBase<P extends Pool> extends SqlClientBase<P> implemen
         promise.fail(cause);
       }
     });
+    return promise.future();
   }
 
   private void acquire(Handler<AsyncResult<Connection>> completionHandler) {
