@@ -18,7 +18,14 @@
 package io.vertx.sqlclient.impl.pool;
 
 import io.vertx.core.impl.ContextInternal;
+import io.vertx.core.impl.EventLoopContext;
 import io.vertx.core.impl.future.PromiseInternal;
+import io.vertx.core.net.impl.clientconnection.ConnectResult;
+import io.vertx.core.net.impl.clientconnection.Lease;
+import io.vertx.core.net.impl.pool.ConnectionEventListener;
+import io.vertx.core.net.impl.pool.ConnectionPool;
+import io.vertx.core.net.impl.pool.Connector;
+import io.vertx.core.net.impl.pool.SimpleConnectionPool;
 import io.vertx.sqlclient.PoolOptions;
 import io.vertx.sqlclient.impl.Connection;
 import io.vertx.sqlclient.impl.ConnectionFactory;
@@ -26,12 +33,9 @@ import io.vertx.sqlclient.impl.command.CommandBase;
 import io.vertx.sqlclient.spi.DatabaseMetadata;
 import io.vertx.core.*;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Todo :
@@ -43,15 +47,10 @@ import java.util.Set;
  */
 public class SqlConnectionPool {
 
-  private final ConnectionFactory connector;
+  private final ConnectionFactory factory;
   private final ContextInternal context;
+  private final ConnectionPool<PooledConnection> pool;
   private final int maxSize;
-  private final ArrayDeque<Handler<AsyncResult<Connection>>> waiters = new ArrayDeque<>();
-  private final Set<PooledConnection> all = new HashSet<>();
-  private final ArrayDeque<PooledConnection> available = new ArrayDeque<>();
-  private int size;
-  private final int maxWaitQueueSize;
-  private boolean checkInProgress;
   private boolean closed;
 
   public SqlConnectionPool(ConnectionFactory connector, int maxSize) {
@@ -62,45 +61,56 @@ public class SqlConnectionPool {
     this(connector, null, maxSize, maxWaitQueueSize);
   }
 
-  public SqlConnectionPool(ConnectionFactory connector, Context context, int maxSize, int maxWaitQueueSize) {
-    Objects.requireNonNull(connector, "No null connector");
+  public SqlConnectionPool(ConnectionFactory factory, Context context, int maxSize, int maxWaitQueueSize) {
+    Objects.requireNonNull(factory, "No null connector");
     if (maxSize < 1) {
       throw new IllegalArgumentException("Pool max size must be > 0");
     }
-    this.maxSize = maxSize;
+    this.pool = new SimpleConnectionPool<>(connector, maxSize, maxSize, maxWaitQueueSize);
     this.context = (ContextInternal) context;
-    this.maxWaitQueueSize = maxWaitQueueSize;
-    this.connector = connector;
+    this.maxSize = maxSize;
+    this.factory = factory;
   }
 
+  private final Connector<PooledConnection> connector = new Connector<PooledConnection>() {
+    @Override
+    public void connect(EventLoopContext context, ConnectionEventListener listener, Handler<AsyncResult<ConnectResult<PooledConnection>>> handler) {
+      PromiseInternal<Connection> promise = context.promise();
+      factory.connect(promise);
+      promise.future()
+        .map(connection -> {
+          PooledConnection pooled = new PooledConnection(connection, listener);
+          connection.init(pooled);
+          return new ConnectResult<>(pooled, 1, 1);
+        })
+        .onComplete(handler);
+    }
+
+    @Override
+    public boolean isValid(PooledConnection connection) {
+      return true;
+    }
+  };
+
   public int available() {
-    return available.size();
+    return maxSize - pool.size();
   }
 
   public int size() {
-    return size;
+    return pool.size();
   }
 
-  public void acquire(Handler<AsyncResult<Connection>> waiter) {
-    if (context != null) {
-      context.emit(waiter, this::doAcquire);
-    } else {
-      doAcquire(waiter);
-    }
-  }
-
-  private void doAcquire(Handler<AsyncResult<Connection>> waiter) {
-    if (closed) {
-      IllegalStateException err = new IllegalStateException("Connection pool closed");
-      if (context != null) {
-        waiter.handle(context.failedFuture(err));
+  public void acquire(ContextInternal context, Handler<AsyncResult<Connection>> waiter) {
+    pool.acquire((EventLoopContext) context, 1, ar -> {
+      if (ar.succeeded()) {
+        Lease<PooledConnection> lease = ar.result();
+        PooledConnection pooled = lease.get();
+        pooled.lease = lease;
+        waiter.handle(Future.succeededFuture(pooled));
       } else {
-        waiter.handle(Future.failedFuture(err));
+        waiter.handle(Future.failedFuture(ar.cause()));
       }
-      return;
-    }
-    waiters.add(waiter);
-    check();
+    });
   }
 
   public Future<Void> close() {
@@ -115,19 +125,15 @@ public class SqlConnectionPool {
       return;
     }
     closed = true;
-    Future<Connection> failure = Future.failedFuture("Connection pool closed");
-    for (Handler<AsyncResult<Connection>> pending : waiters) {
-      try {
-        pending.handle(failure);
-      } catch (Exception ignore) {
-      }
-    }
-    List<Future> futures = new ArrayList<>();
-    for (PooledConnection pooled : new ArrayList<>(all)) {
-      Promise<Void> p = Promise.promise();
-      pooled.close(p);
-      futures.add(p.future());
-    }
+    List<Future> futures = pool
+      .close()
+      .stream().map(f -> f
+        .flatMap(c -> {
+          Promise<Void> p = Promise.promise();
+          c.close(p);
+          return p.future();
+        }))
+      .collect(Collectors.toList());
     CompositeFuture
       .join(futures)
       .<Void>mapEmpty()
@@ -137,10 +143,13 @@ public class SqlConnectionPool {
   private class PooledConnection implements Connection, Connection.Holder  {
 
     private final Connection conn;
+    private final ConnectionEventListener listener;
     private Holder holder;
+    private Lease<PooledConnection> lease;
 
-    PooledConnection(Connection conn) {
+    PooledConnection(Connection conn, ConnectionEventListener listener) {
       this.conn = conn;
+      this.listener = listener;
     }
 
     @Override
@@ -192,26 +201,21 @@ public class SqlConnectionPool {
         }
         // Log it ?
         promise.fail(msg);
-        return;
+      } else {
+        Lease<PooledConnection> l = this.lease;
+        this.holder = null;
+        this.lease = null;
+        l.recycle();
+        promise.complete();
       }
-      this.holder = null;
-      release(this);
-      promise.complete();
     }
 
     @Override
     public void handleClosed() {
-      if (all.remove(this)) {
-        size--;
-        if (holder == null) {
-          available.remove(this);
-        } else {
-          holder.handleClosed();
-        }
-        check();
-      } else {
-        throw new IllegalStateException();
+      if (holder != null) {
+        holder.handleClosed();
       }
+      listener.remove();
     }
 
     @Override
@@ -236,68 +240,6 @@ public class SqlConnectionPool {
     @Override
     public int getSecretKey() {
       return conn.getSecretKey();
-    }
-  }
-
-  private void release(PooledConnection proxy) {
-    if (all.contains(proxy)) {
-      available.add(proxy);
-      check();
-    }
-  }
-
-  private void check() {
-    if (closed) {
-      return;
-    }
-    if (!checkInProgress) {
-      checkInProgress = true;
-      try {
-        while (waiters.size() > 0) {
-          if (available.size() > 0) {
-            PooledConnection proxy = available.poll();
-            Handler<AsyncResult<Connection>> waiter = waiters.poll();
-            waiter.handle(Future.succeededFuture(proxy));
-          } else {
-            if (size < maxSize) {
-              Handler<AsyncResult<Connection>> waiter = waiters.poll();
-              size++;
-              Promise<Connection> promise;
-              if (context == null) {
-                promise = Promise.promise();
-              } else {
-                promise = context.promise();
-              }
-              connector.connect(promise);
-              promise.future().onComplete(ar -> {
-                if (ar.succeeded()) {
-                  Connection conn = ar.result();
-                  PooledConnection proxy = new PooledConnection(conn);
-                  all.add(proxy);
-                  conn.init(proxy);
-                  waiter.handle(Future.succeededFuture(proxy));
-                } else {
-                  size--;
-                  waiter.handle(Future.failedFuture(ar.cause()));
-                  check();
-                }
-              });
-            } else {
-              if (maxWaitQueueSize >= 0) {
-                int numInProgress = size - all.size();
-                int numToFail = waiters.size() - (maxWaitQueueSize + numInProgress);
-                while (numToFail-- > 0) {
-                  Handler<AsyncResult<Connection>> waiter = waiters.pollLast();
-                  waiter.handle(Future.failedFuture("Max waiter size reached"));
-                }
-              }
-              break;
-            }
-          }
-        }
-      } finally {
-        checkInProgress = false;
-      }
     }
   }
 }

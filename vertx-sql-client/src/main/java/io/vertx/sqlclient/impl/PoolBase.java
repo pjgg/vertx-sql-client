@@ -87,7 +87,7 @@ public abstract class PoolBase<P extends Pool> extends SqlClientBase<P> implemen
       metric = null;
     }
     Promise<Connection> promise = current.promise();
-    acquire(promise);
+    acquire(current, promise);
     if (metrics != null) {
       promise.future().onComplete(ar -> {
         metrics.dequeueRequest(metric);
@@ -109,7 +109,7 @@ public abstract class PoolBase<P extends Pool> extends SqlClientBase<P> implemen
     } else {
       metric = null;
     }
-    acquire(new CommandWaiter() {
+    acquire(context, new CommandWaiter() {
       @Override
       protected void onSuccess(Connection conn) {
         if (metrics != null) {
@@ -133,8 +133,8 @@ public abstract class PoolBase<P extends Pool> extends SqlClientBase<P> implemen
     return promise.future();
   }
 
-  private void acquire(Handler<AsyncResult<Connection>> completionHandler) {
-    pool.acquire(completionHandler);
+  private void acquire(ContextInternal context, Handler<AsyncResult<Connection>> completionHandler) {
+    pool.acquire(context, completionHandler);
   }
 
   private static abstract class CommandWaiter implements Connection.Holder, Handler<AsyncResult<Connection>> {
