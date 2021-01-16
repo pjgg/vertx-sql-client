@@ -27,7 +27,7 @@ import io.vertx.sqlclient.Pool;
 import io.vertx.sqlclient.PoolOptions;
 import io.vertx.sqlclient.SqlConnection;
 import io.vertx.sqlclient.impl.command.CommandBase;
-import io.vertx.sqlclient.impl.pool.ConnectionPool;
+import io.vertx.sqlclient.impl.pool.SqlConnectionPool;
 import io.vertx.sqlclient.impl.tracing.QueryTracer;
 
 /**
@@ -39,7 +39,7 @@ public abstract class PoolBase<P extends Pool> extends SqlClientBase<P> implemen
   private final ContextInternal context;
   private final VertxInternal vertx;
   private final ConnectionFactory factory;
-  private final ConnectionPool pool;
+  private final SqlConnectionPool pool;
   private final CloseFuture closeFuture;
 
   public PoolBase(ContextInternal context, ConnectionFactory factory, QueryTracer tracer, ClientMetrics metrics, PoolOptions poolOptions) {
@@ -47,7 +47,7 @@ public abstract class PoolBase<P extends Pool> extends SqlClientBase<P> implemen
     this.context = context;
     this.vertx = context.owner();
     this.factory = factory;
-    this.pool = new ConnectionPool(factory, context, poolOptions.getMaxSize(), poolOptions.getMaxWaitQueueSize());
+    this.pool = new SqlConnectionPool(factory, context, poolOptions.getMaxSize(), poolOptions.getMaxWaitQueueSize());
     this.closeFuture = new CloseFuture(this);
   }
 

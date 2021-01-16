@@ -41,7 +41,7 @@ import java.util.Set;
  *
  * @author <a href="mailto:julien@julienviet.com">Julien Viet</a>
  */
-public class ConnectionPool {
+public class SqlConnectionPool {
 
   private final ConnectionFactory connector;
   private final ContextInternal context;
@@ -54,15 +54,15 @@ public class ConnectionPool {
   private boolean checkInProgress;
   private boolean closed;
 
-  public ConnectionPool(ConnectionFactory connector, int maxSize) {
+  public SqlConnectionPool(ConnectionFactory connector, int maxSize) {
     this(connector, maxSize, PoolOptions.DEFAULT_MAX_WAIT_QUEUE_SIZE);
   }
 
-  public ConnectionPool(ConnectionFactory connector, int maxSize, int maxWaitQueueSize) {
+  public SqlConnectionPool(ConnectionFactory connector, int maxSize, int maxWaitQueueSize) {
     this(connector, null, maxSize, maxWaitQueueSize);
   }
 
-  public ConnectionPool(ConnectionFactory connector, Context context, int maxSize, int maxWaitQueueSize) {
+  public SqlConnectionPool(ConnectionFactory connector, Context context, int maxSize, int maxWaitQueueSize) {
     Objects.requireNonNull(connector, "No null connector");
     if (maxSize < 1) {
       throw new IllegalArgumentException("Pool max size must be > 0");
