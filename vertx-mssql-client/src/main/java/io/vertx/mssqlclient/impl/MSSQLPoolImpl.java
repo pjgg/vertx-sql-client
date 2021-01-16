@@ -11,8 +11,6 @@
 
 package io.vertx.mssqlclient.impl;
 
-import io.vertx.core.AsyncResult;
-import io.vertx.core.Handler;
 import io.vertx.core.impl.CloseFuture;
 import io.vertx.core.impl.ContextInternal;
 import io.vertx.core.spi.metrics.ClientMetrics;
@@ -21,7 +19,6 @@ import io.vertx.mssqlclient.MSSQLConnectOptions;
 import io.vertx.mssqlclient.MSSQLPool;
 import io.vertx.sqlclient.PoolOptions;
 import io.vertx.sqlclient.impl.Connection;
-import io.vertx.sqlclient.impl.ConnectionFactory;
 import io.vertx.sqlclient.impl.PoolBase;
 import io.vertx.sqlclient.impl.SqlConnectionImpl;
 import io.vertx.sqlclient.impl.tracing.QueryTracer;
@@ -32,7 +29,7 @@ public class MSSQLPoolImpl extends PoolBase<MSSQLPoolImpl> implements MSSQLPool 
     QueryTracer tracer = context.tracer() == null ? null : new QueryTracer(context.tracer(), connectOptions);
     VertxMetrics vertxMetrics = context.owner().metricsSPI();
     ClientMetrics metrics = vertxMetrics != null ? vertxMetrics.createClientMetrics(connectOptions.getSocketAddress(), "sql", connectOptions.getMetricsName()) : null;
-    MSSQLPoolImpl pool = new MSSQLPoolImpl(context, new MSSQLConnectionFactory(ConnectionFactory.asEventLoopContext(context), connectOptions), tracer, metrics, poolOptions);
+    MSSQLPoolImpl pool = new MSSQLPoolImpl(context, new MSSQLConnectionFactory(context.owner(), connectOptions), tracer, metrics, poolOptions);
     CloseFuture closeFuture = pool.closeFuture();
     if (closeVertx) {
       closeFuture.onComplete(ar -> context.owner().close());
