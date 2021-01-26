@@ -47,7 +47,7 @@ public class DB2PoolImpl extends PoolBase<DB2PoolImpl> implements DB2Pool {
   private final DB2ConnectionFactory factory;
 
   private DB2PoolImpl(ContextInternal context, PoolOptions poolOptions, DB2ConnectionFactory factory, QueryTracer tracer, ClientMetrics metrics) {
-    super(context, factory, tracer, metrics, poolOptions);
+    super(context, factory, tracer, metrics, 1, poolOptions);
     this.factory = factory;
   }
 

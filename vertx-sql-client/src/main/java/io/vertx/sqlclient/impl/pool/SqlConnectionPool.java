@@ -50,24 +50,21 @@ public class SqlConnectionPool {
   private final ConnectionFactory factory;
   private final ContextInternal context;
   private final ConnectionPool<PooledConnection> pool;
+  private final int pipeliningLimit;
   private final int maxSize;
   private boolean closed;
 
-  public SqlConnectionPool(ConnectionFactory connector, int maxSize) {
-    this(connector, maxSize, PoolOptions.DEFAULT_MAX_WAIT_QUEUE_SIZE);
-  }
-
-  public SqlConnectionPool(ConnectionFactory connector, int maxSize, int maxWaitQueueSize) {
-    this(connector, null, maxSize, maxWaitQueueSize);
-  }
-
-  public SqlConnectionPool(ConnectionFactory factory, Context context, int maxSize, int maxWaitQueueSize) {
+  public SqlConnectionPool(ConnectionFactory factory, Context context, int maxSize, int pipeliningLimit, int maxWaitQueueSize) {
     Objects.requireNonNull(factory, "No null connector");
     if (maxSize < 1) {
       throw new IllegalArgumentException("Pool max size must be > 0");
     }
+    if (pipeliningLimit < 1) {
+      throw new IllegalArgumentException("Pipelining limit must be > 0");
+    }
     this.pool = new SimpleConnectionPool<>(connector, maxSize, maxSize, maxWaitQueueSize);
     this.context = (ContextInternal) context;
+    this.pipeliningLimit = pipeliningLimit;
     this.maxSize = maxSize;
     this.factory = factory;
   }
@@ -81,7 +78,7 @@ public class SqlConnectionPool {
         .map(connection -> {
           PooledConnection pooled = new PooledConnection(connection, listener);
           connection.init(pooled);
-          return new ConnectResult<>(pooled, 1, 1);
+          return new ConnectResult<>(pooled, pipeliningLimit, 1);
         })
         .onComplete(handler);
     }
@@ -98,6 +95,24 @@ public class SqlConnectionPool {
 
   public int size() {
     return pool.size();
+  }
+
+  public <R> Future<R> execute(ContextInternal context, CommandBase<R> cmd) {
+    Promise<R> promise = context.promise();
+    pool.acquire((EventLoopContext) context, 1, ar -> {
+      if (ar.succeeded()) {
+        Lease<PooledConnection> lease = ar.result();
+        PooledConnection pooled = lease.get();
+        pooled.schedule(context, cmd)
+          .onComplete(promise)
+          .onComplete(v -> {
+            lease.recycle();
+          });
+      } else {
+        promise.fail(ar.cause());
+      }
+    });
+    return promise.future();
   }
 
   public void acquire(ContextInternal context, Handler<AsyncResult<Connection>> waiter) {

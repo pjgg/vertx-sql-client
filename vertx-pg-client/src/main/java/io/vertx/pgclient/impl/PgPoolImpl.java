@@ -40,11 +40,12 @@ import io.vertx.sqlclient.impl.tracing.QueryTracer;
  */
 public class PgPoolImpl extends PoolBase<PgPoolImpl> implements PgPool {
 
-  public static PgPoolImpl create(ContextInternal context, boolean closeVertx, PgConnectOptions connectOptions, PoolOptions poolOptions) {
+  public static PgPoolImpl create(ContextInternal context, boolean closeVertx, boolean pipelined, PgConnectOptions connectOptions, PoolOptions poolOptions) {
     QueryTracer tracer = context.tracer() == null ? null : new QueryTracer(context.tracer(), connectOptions);
     VertxMetrics vertxMetrics = context.owner().metricsSPI();
     ClientMetrics metrics = vertxMetrics != null ? vertxMetrics.createClientMetrics(connectOptions.getSocketAddress(), "sql", connectOptions.getMetricsName()) : null;
-    PgPoolImpl pool = new PgPoolImpl(context, new PgConnectionFactory(context.owner(), connectOptions), tracer, metrics, poolOptions);
+    int pipeliningLimit = pipelined ? connectOptions.getPipeliningLimit() : 1;
+    PgPoolImpl pool = new PgPoolImpl(context, new PgConnectionFactory(context.owner(), connectOptions), tracer, metrics, pipeliningLimit, poolOptions);
     CloseFuture closeFuture = pool.closeFuture();
     if (closeVertx) {
       closeFuture.onComplete(ar -> context.owner().close());
@@ -56,8 +57,8 @@ public class PgPoolImpl extends PoolBase<PgPoolImpl> implements PgPool {
 
   private final PgConnectionFactory factory;
 
-  private PgPoolImpl(ContextInternal context, PgConnectionFactory factory, QueryTracer tracer, ClientMetrics metrics, PoolOptions poolOptions) {
-    super(context, factory, tracer, metrics, poolOptions);
+  private PgPoolImpl(ContextInternal context, PgConnectionFactory factory, QueryTracer tracer, ClientMetrics metrics, int pipeliningLimit, PoolOptions poolOptions) {
+    super(context, factory, tracer, metrics, pipeliningLimit, poolOptions);
     this.factory = factory;
   }
 

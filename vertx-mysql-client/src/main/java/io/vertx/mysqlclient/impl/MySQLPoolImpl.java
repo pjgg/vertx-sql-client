@@ -42,7 +42,7 @@ public class MySQLPoolImpl extends PoolBase<MySQLPoolImpl> implements MySQLPool 
   private final MySQLConnectionFactory factory;
 
   private MySQLPoolImpl(ContextInternal context, MySQLConnectionFactory factory, QueryTracer tracer, ClientMetrics metrics, PoolOptions poolOptions) {
-    super(context, factory, tracer, metrics, poolOptions);
+    super(context, factory, tracer, metrics, 1, poolOptions);
     this.factory = factory;
   }
 

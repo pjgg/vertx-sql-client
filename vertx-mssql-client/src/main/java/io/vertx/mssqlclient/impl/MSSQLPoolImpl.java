@@ -42,7 +42,7 @@ public class MSSQLPoolImpl extends PoolBase<MSSQLPoolImpl> implements MSSQLPool 
   private final MSSQLConnectionFactory connectionFactory;
 
   private MSSQLPoolImpl(ContextInternal context, MSSQLConnectionFactory factory, QueryTracer tracer, ClientMetrics metrics, PoolOptions poolOptions) {
-    super(context, factory, tracer, metrics, poolOptions);
+    super(context, factory, tracer, metrics, 1, poolOptions);
     this.connectionFactory = factory;
   }
 

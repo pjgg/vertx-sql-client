@@ -42,12 +42,17 @@ public abstract class PoolBase<P extends Pool> extends SqlClientBase<P> implemen
   private final SqlConnectionPool pool;
   private final CloseFuture closeFuture;
 
-  public PoolBase(ContextInternal context, ConnectionFactory factory, QueryTracer tracer, ClientMetrics metrics, PoolOptions poolOptions) {
+  public PoolBase(ContextInternal context,
+                  ConnectionFactory factory,
+                  QueryTracer tracer,
+                  ClientMetrics metrics,
+                  int pipeliningLimit,
+                  PoolOptions poolOptions) {
     super(tracer, metrics);
     this.context = context;
     this.vertx = context.owner();
     this.factory = factory;
-    this.pool = new SqlConnectionPool(factory, context, poolOptions.getMaxSize(), poolOptions.getMaxWaitQueueSize());
+    this.pool = new SqlConnectionPool(factory, context, poolOptions.getMaxSize(), pipeliningLimit, poolOptions.getMaxWaitQueueSize());
     this.closeFuture = new CloseFuture(this);
   }
 
@@ -102,35 +107,21 @@ public abstract class PoolBase<P extends Pool> extends SqlClientBase<P> implemen
 
   @Override
   public <R> Future<R> schedule(ContextInternal context, CommandBase<R> cmd) {
-    Promise<R> promise = context.promise();
     Object metric;
     if (metrics != null) {
       metric = metrics.enqueueRequest();
     } else {
       metric = null;
     }
-    acquire(context, new CommandWaiter() {
-      @Override
-      protected void onSuccess(Connection conn) {
+    Future<R> fut = pool.execute(context, cmd);
+    if (metrics != null) {
+      fut.onComplete(ar -> {
         if (metrics != null) {
           metrics.dequeueRequest(metric);
         }
-        conn.schedule(context, cmd)
-          .onComplete(promise)
-          .onComplete(v -> {
-          // Use null promise instead
-          conn.close(this, Promise.promise());
-        });
-      }
-      @Override
-      protected void onFailure(Throwable cause) {
-        if (metrics != null) {
-          metrics.dequeueRequest(metric);
-        }
-        promise.fail(cause);
-      }
-    });
-    return promise.future();
+      });
+    }
+    return fut;
   }
 
   private void acquire(ContextInternal context, Handler<AsyncResult<Connection>> completionHandler) {

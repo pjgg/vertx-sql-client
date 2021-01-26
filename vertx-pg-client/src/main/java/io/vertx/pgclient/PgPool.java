@@ -24,6 +24,7 @@ import io.vertx.sqlclient.Pool;
 import io.vertx.codegen.annotations.VertxGen;
 import io.vertx.core.Vertx;
 import io.vertx.core.VertxOptions;
+import io.vertx.sqlclient.SqlClient;
 
 /**
  * A {@link Pool pool} of {@link PgConnection PostgreSQL connections}.
@@ -97,14 +98,31 @@ public interface PgPool extends Pool {
       vertxOptions.setPreferNativeTransport(true);
     }
     VertxInternal vertx = (VertxInternal) Vertx.vertx(vertxOptions);
-    return PgPoolImpl.create(vertx.getOrCreateContext(), true, connectOptions, poolOptions);
+    return PgPoolImpl.create(vertx.getOrCreateContext(), true, false, connectOptions, poolOptions);
   }
 
   /**
    * Like {@link #pool(PgConnectOptions, PoolOptions)} with a specific {@link Vertx} instance.
    */
   static PgPool pool(Vertx vertx, PgConnectOptions connectOptions, PoolOptions poolOptions) {
-    return PgPoolImpl.create(((VertxInternal)vertx).getOrCreateContext(), false, connectOptions, poolOptions);
+    return PgPoolImpl.create(((VertxInternal)vertx).getOrCreateContext(), false, false, connectOptions, poolOptions);
   }
 
+  /**
+   * Create a client backed by a connection pool to the database configured with the given {@code connectOptions} and {@code poolOptions}.
+   *
+   * @param poolOptions the options for creating the backing pool
+   * @return the client
+   */
+  static SqlClient client(PgConnectOptions connectOptions, PoolOptions poolOptions) {
+    if (Vertx.currentContext() != null) {
+      throw new IllegalStateException("Running in a Vertx context => use PgPool#pool(Vertx, PgConnectOptions, PoolOptions) instead");
+    }
+    VertxOptions vertxOptions = new VertxOptions();
+    if (connectOptions.isUsingDomainSocket()) {
+      vertxOptions.setPreferNativeTransport(true);
+    }
+    VertxInternal vertx = (VertxInternal) Vertx.vertx(vertxOptions);
+    return PgPoolImpl.create(vertx.getOrCreateContext(), true, true, connectOptions, poolOptions);
+  }
 }

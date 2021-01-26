@@ -20,6 +20,7 @@ package io.vertx.pgclient;
 import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
 import io.vertx.sqlclient.PoolOptions;
+import io.vertx.sqlclient.SqlClient;
 import io.vertx.sqlclient.Tuple;
 import org.junit.Test;
 
@@ -224,7 +225,7 @@ public class PgPoolTest extends PgPoolTestBase {
 
     int num = 3;
     Async async = ctx.async(num);
-    PgPool pool = PgPool.pool(options, new PoolOptions().setMaxSize(1));
+    SqlClient pool = PgPool.client(options, new PoolOptions().setMaxSize(1));
     AtomicLong start = new AtomicLong();
     // Connect to the database
     pool.query("select 1").execute(ctx.asyncAssertSuccess(res1 -> {
