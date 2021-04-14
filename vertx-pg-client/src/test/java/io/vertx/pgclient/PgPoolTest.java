@@ -19,8 +19,11 @@ package io.vertx.pgclient;
 
 import io.vertx.ext.unit.Async;
 import io.vertx.ext.unit.TestContext;
+import io.vertx.ext.unit.junit.Repeat;
 import io.vertx.sqlclient.PoolOptions;
 import io.vertx.sqlclient.Tuple;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import org.junit.Test;
 
 import java.util.HashSet;
@@ -194,6 +197,34 @@ public class PgPoolTest extends PgPoolTestBase {
         ctrlConn.close();
       }
       pool.close();
+    }
+  }
+
+  @Repeat(50)
+  @Test
+  public void checkBorderConditionBetweenIdleAndGetConnection(TestContext ctx) {
+    int concurrentRequestAmount = 100;
+   // int idle = 1000;
+    int poolSize = 5;
+
+   // poolOptions.setMaxSize(poolSize).setIdleTimeout(idle).setIdleTimeoutUnit(TimeUnit.MILLISECONDS);
+   // PgPool pool = createPool(options, poolOptions);
+
+    PgPool pool = createPool(new PgConnectOptions(options), new PoolOptions());
+
+    Async async = ctx.async(concurrentRequestAmount);
+    for (int i = 0; i < concurrentRequestAmount; i++) {
+      CompletableFuture.runAsync(() -> {
+        pool.query("SELECT CURRENT_TIMESTAMP;").execute(ctx.asyncAssertSuccess(rowSet -> {
+         //  pool.query("select count(*) as cnt from pg_stat_activity where application_name like '%vertx%' and state = 'active'").execute(ctx.asyncAssertSuccess(rows -> {
+          pool.query("select count(*) as cnt from pg_stat_activity where application_name like '%vertx%'").execute(ctx.asyncAssertSuccess(rows -> {
+            Integer count = rows.iterator().next().getInteger("cnt");
+            System.out.println(count);
+            ctx.assertInRange(count, 1, poolSize, "Oops!...Connections exceed poolSize. Are you leaked connections?.");
+            async.countDown();
+          }));
+        }));
+      });
     }
   }
 }
